@@ -154,6 +154,7 @@ if not df.empty:
             pickable=True
         )
 
+
         # Render Map
         st.pydeck_chart(pdk.Deck(
             map_style='mapbox://styles/mapbox/light-v9',
