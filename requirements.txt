@@ -5,3 +5,4 @@ geopy
 gTTS
 requests
 polyline
+streamlit_js_eval
