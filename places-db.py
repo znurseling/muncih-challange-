@@ -2,6 +2,7 @@ import pandas as pd
 
 def create_munich_dataset():
 
+
     data = [
         # Nature
         {"name": "Eisbachwelle", "lat": 48.1435, "lon": 11.5877, "category": "Nature", "desc": "A famous river wave where surfers show off their skills in the middle of the city."},
