@@ -2,7 +2,6 @@ import requests
 from geopy.distance import geodesic
 import random
 
-
 def fetch_air_quality(lat=None, lon=None):
     """
     Fetches air quality data using the Open-Meteo Air Quality API (free, no auth required).

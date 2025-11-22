@@ -26,6 +26,7 @@ def create_munich_dataset():
         {"name": "Lenbachhaus", "lat": 48.1470, "lon": 11.5637, "category": "Art", "desc": "Famous for its collection of works by the 'Blue Rider' group, including Kandinsky.", "noise_level": 95, "air_quality": 30, "shade_score": 70, "barrier_free_score": 50}
     ]
     
+    
     df = pd.DataFrame(data)
     df.to_csv("places-in-munich.csv", index=False)
     print("'places-in-munich.csv' has been created.")
