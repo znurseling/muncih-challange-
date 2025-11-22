@@ -55,3 +55,4 @@ def fetch_osm_data():
     print(("CSV successfully created with", len(df), "locations."))
 if __name__ == "__main__":
     fetch_osm_data()
+

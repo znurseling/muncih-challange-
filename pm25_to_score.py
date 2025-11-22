@@ -10,3 +10,4 @@ def pm25_to_score(pm25):
         return 50
     score = max(0, min(100, int(100 - (pm25 / 75) * 100)))
     return score
+

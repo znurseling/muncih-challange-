@@ -7,7 +7,6 @@ import io
 import requests
 import polyline
 
-
 from fetch_air_quality import fetch_air_quality
 from pm25_to_score import pm25_to_score
 
