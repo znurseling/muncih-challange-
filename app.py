@@ -13,7 +13,7 @@ st.set_page_config(page_title="CityTour Munich", layout="centered")
 # MAPBOX TOKEN
 MAPBOX_API_KEY = "" 
 
-# CSS (DARK MODE) ---
+# CSS (DARK MODE) 
 st.markdown("""
     <style>
     /* Dark Mode Backgrounds */
@@ -108,7 +108,6 @@ def get_osrm_route(locations):
 
 def optimize_route_ordering(df):
     """
-    Orders points using a Nearest Neighbor approach (TSP approximation).
     Start point: Closest to Marienplatz.
     Next point: Closest unvisited neighbor.
     """
@@ -117,107 +116,101 @@ def optimize_route_ordering(df):
         
     points = df.to_dict('records')
     
-    # 1. Find start node (Closest to City Center/Marienplatz)
     marienplatz = (48.1372, 11.5755)
     start_node = min(points, key=lambda p: geodesic((p['lat'], p['lon']), marienplatz).km)
     
-    # 2. Nearest Neighbor Algorithm
+    # Greedy Algorithm
     ordered_path = [start_node]
     points.remove(start_node)
     
     while points:
         current = ordered_path[-1]
-        # Find nearest unvisited neighbor
         nearest = min(points, key=lambda p: geodesic((current['lat'], current['lon']), (p['lat'], p['lon'])).km)
         ordered_path.append(nearest)
         points.remove(nearest)
         
     return pd.DataFrame(ordered_path)
 
-# 1. WELCOME SCREEN (SETUP)
+# WELCOME SCREEN (SETUP)
 if not st.session_state.setup_complete:
-    st.title("Hey und Willkommen! 🦁")
-    st.subheader("Erschaffe deine persönliche Munich Experience")
+    st.title("Heyy, Welcome!")
+    st.subheader("Build your personal Munich Experience")
 
     st.session_state.user_name = st.text_input(
-        "Wie dürfen wir dich nennen?", placeholder="Dein Name"
+        "How should we call you?", placeholder="Your name"
     )
 
-    st.markdown("### Verrate uns deine Interessen")
+    st.markdown("### What are we exploring today")
     
-    # Mapping categories from CSV to display names if needed, 
-    # or just using CSV categories directly. 
-    # For this code, we use the categories found in the CSV + some extras from your team's list.
+    # CSV catagories
     available_categories = list(df['category'].unique()) if not df.empty else []
     
     st.session_state.user_interests = st.multiselect(
-        "Was interessiert dich am meisten?",
+        "What are your interests?",
         available_categories,
-        default=available_categories[:1] # Select first by default
+        default=available_categories[:1]
     )
 
     st.markdown("### Modus")
     mode_selection = st.radio(
-        "Wie möchtest du geführt werden?",
-        ["🧭 Proaktiver Modus (Automatische Route)",
-         "🎲 Nur Präferenzen (Freie Entdeckung)"]
+        "How would like to sightsee?",
+        ["🧭 Automatic route built just for you!",
+         "🎲 Explore freely as you go!"]
     )
     
     # Map the long text to simple internal keys
-    if "Proaktiver" in mode_selection:
+    if "Automatic" in mode_selection:
         st.session_state.user_mode = "Guided"
     else:
         st.session_state.user_mode = "Spontaneous"
 
     st.write("---")
 
-    if st.button("Los gehts!"):
+    if st.button("Let's go!"):
         if st.session_state.user_name == "":
-            st.warning("Bitte gib Deinen Namen ein 😊")
+            st.warning("Please enter your name 😊")
         elif len(st.session_state.user_interests) == 0:
-            st.warning("Bitte wähle mindestens ein Interesse aus 😊")
+            st.warning("Please choose at least one interest 😊")
         else:
             st.session_state.setup_complete = True
-            st.success("Perfekt! Deine Map wird vorbereitet...")
+            st.success("Perfect! We are preparing your map...")
             st.rerun()
 
-# 2. MAIN APP (AFTER SETUP)
+# MAIN APP (AFTER SETUP)
 else:
     if df.empty:
         st.error("CSV not found! Please check places-in-munich.csv")
     else:
-        # --- FILTER DATA ---
-        # Filter by ALL selected interests
+        # filter input 
         filtered_df = df[df['category'].isin(st.session_state.user_interests)].copy()
         
         # Reset Button (Top Right logic via Expander)
         with st.expander(f"👤 Profil: {st.session_state.user_name}", expanded=False):
-            st.write(f"**Interessen:** {', '.join(st.session_state.user_interests)}")
-            st.write(f"**Modus:** {st.session_state.user_mode}")
-            if st.button("Profil zurücksetzen"):
+            st.write(f"**Interests:** {', '.join(st.session_state.user_interests)}")
+            st.write(f"**Mode:** {st.session_state.user_mode}")
+            if st.button("Reset Profile"):
                 st.session_state.setup_complete = False
                 st.session_state.visited = []
                 st.rerun()
 
-        st.markdown(f"## Dein Munich Walk")
+        st.markdown(f"## Your Munich Walk")
         
         layers = []
-        # Default Center
         view_state = pdk.ViewState(latitude=48.137, longitude=11.575, zoom=13, pitch=45)
 
-        # MODE A: GUIDED PATH (Proaktiver Modus)
+        # mode 1 -> guided path (Proaktiver Modus)
         if st.session_state.user_mode == "Guided":
-            st.caption("Folge der blauen Linie zu deinen Zielen.")
+            st.caption("Follow the blue line to reach your Target.")
             
             if not filtered_df.empty:
-                # --- ADDED OPTIMIZATION CALL HERE ---
+                # optimize the nodes
                 filtered_df = optimize_route_ordering(filtered_df)
                 
-                # Route Calculation
+                # Calculate Route
                 route_points = list(zip(filtered_df['lat'], filtered_df['lon']))
                 real_path = get_osrm_route(route_points)
                 
-                # Layer 1: The Path
+                # The Path
                 layers.append(pdk.Layer(
                     "PathLayer",
                     data=[{"path": real_path}],
@@ -227,7 +220,7 @@ else:
                     width_min_pixels=3
                 ))
                 
-                # Layer 2: Numbered Markers
+                # Numbered Points
                 filtered_df['idx'] = range(1, len(filtered_df) + 1)
                 layers.append(pdk.Layer(
                     "ScatterplotLayer",
@@ -253,18 +246,18 @@ else:
                 view_state.latitude = filtered_df.iloc[0]['lat']
                 view_state.longitude = filtered_df.iloc[0]['lon']
 
-        # MODE B: SPONTANEOUS (Nur Präferenzen)
+        # mode 2 -> spontaneuos (explore as you go)
         else:
-            st.caption("Nutze die Slider zum Navigieren. Orte erscheinen, wenn du nah bist!")
+            st.caption("Use the Slider to move, the places should appear if you get close to them!")
             
-            # Two sliders for navigation
+            # Two sliders
             col_nav1, col_nav2 = st.columns(2)
             with col_nav1:
                 lat_val = st.slider("↕️ Nord-Süd", 0, 100, 50)
             with col_nav2:
                 lon_val = st.slider("↔️ West-Ost", 0, 100, 50)
             
-            # Calculate User Position (Ursprung: Marienplatz Center)
+            # User Position (Ursprung: Marienplatz Center)
             user_lat = 48.1370 + ((lat_val - 50) * 0.0004)
             user_lon = 11.5750 + ((lon_val - 50) * 0.0006)
             
@@ -292,7 +285,7 @@ else:
                 get_radius=30, 
             ))
 
-            # Layer 2: Discovered Spots (Green)
+            # Discovered points (Green)
             discovered_df = filtered_df[filtered_df['name'].isin(st.session_state.visited)]
             if not discovered_df.empty:
                 layers.append(pdk.Layer(
@@ -304,7 +297,7 @@ else:
                     pickable=True
                 ))
             
-            # Update View to follow user
+            # follow user as they move
             view_state.latitude = user_lat
             view_state.longitude = user_lon
             view_state.zoom = 15
@@ -312,8 +305,8 @@ else:
 
             # Notifications
             if nearby_place is not None:
-                st.success(f"Gefunden: {nearby_place['name']}!")
-                if st.button("🔊 Infos anhören"):
+                st.success(f"Found: {nearby_place['name']}!")
+                if st.button("🔊 Listen the information"):
                     aud = text_to_speech(nearby_place['desc'])
                     if aud: st.audio(aud, format='audio/mp3')
 
@@ -333,9 +326,9 @@ else:
             tooltip={"text": "{name}"}
         ), height=400) 
 
-        # LIST OF STOPS (Guided Only)
+        # LIST OF STOPS 
         if st.session_state.user_mode == "Guided":
-            st.markdown("### Deine Route")
+            st.markdown("### Your route")
             for i, row in filtered_df.iterrows():
                 with st.expander(f"{i+1}. {row['name']}"):
                     st.write(row['desc'])
