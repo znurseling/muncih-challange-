@@ -4,8 +4,59 @@ import pydeck as pdk
 from geopy.distance import geodesic
 from gtts import gTTS
 import io
+import requests
+import polyline
 
-# WELCOME SCREEN
+# --- CONFIGURATION ---
+st.set_page_config(page_title="CityTour Munich", layout="centered")
+
+# MAPBOX TOKEN
+MAPBOX_API_KEY = "" 
+
+# CSS (DARK MODE) ---
+st.markdown("""
+    <style>
+    /* Dark Mode Backgrounds */
+    .stApp { background-color: #1b1b1c; }
+    
+    /* Mobile-like Container */
+    .main .block-container {
+        max-width: 500px; 
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        background-color: #2f2e30; 
+        border-radius: 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        margin: 0 auto;
+        color: white; 
+    }
+    
+    /* Text Colors */
+    h1, h2, h3, p, span, div, label, .stMarkdown, .stRadio { color: #ffffff !important; }
+    
+    /* Input Fields */
+    .stTextInput input { background-color: #3d3d3d; color: white; border: none; }
+    .stMultiSelect div[data-baseweb="select"] > div { background-color: #3d3d3d; color: white; }
+    
+    /* Hide Header */
+    header {visibility: hidden;}
+    
+    /* Buttons */
+    div.stButton > button {
+        border-radius: 25px;
+        padding: 0.5rem 1rem;
+        background-color: #444444; 
+        color: white;
+        border: 1px solid #555555;
+        width: 100%;
+    }
+    div.stButton > button:hover {
+        border-color: #00aaff;
+        color: #00aaff;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 
 if "setup_complete" not in st.session_state:
     st.session_state.setup_complete = False
@@ -15,258 +66,279 @@ if "user_interests" not in st.session_state:
     st.session_state.user_interests = []
 if "user_mode" not in st.session_state:
     st.session_state.user_mode = ""
+if "visited" not in st.session_state:
+    st.session_state.visited = []
 
-# vor setup welcome page
-if not st.session_state.setup_complete:
-    st.title("Hey und Willkommen beim neuen Munich Explorer")
-    st.subheader("Erschaffe deine persönliche München Exprience")
-
-    st.session_state.user_name = st.text_input(
-        "Wie dürfen wir dich nennen?", placeholder= "Dein name"
-    )
-
-    st.markdown("## Verrate uns Interessen")
-    all_interests = ["Architektur",
-                     "Geschichte",
-                     "Natur",
-                     "Ruhe / Entspannung",
-                     "Barrierefreiheit",
-                     "Stadtbild",
-                     "Biodiversität",
-                     "Umwelt (Luft, Lärm, Hitze)",
-                     "Kulturelle Events"
-                     ]
-
-    st.session_state.user_interests = st.multiselect(
-        "Was interessiert dich auf deinem Spaziergang am meisten?",
-        all_interests
-    )
-    st.markdown("Mode")
-    st.session_state.user_mode = st.radio(
-        "Wie möchtest du geführt werden?",
-        ["🧭 Proaktiver Modus (Wir schlagen dir Dinge automatisch vor)",
-         "📘 Nur Präferenzen (Du entscheidest selbst)"]
-    )
-    st.write("---")
-
-    if st.button("Los gehts!"):
-        if st.session_state.user_name=="":
-            st.warning("Bitte gebe Deinen Namen ein 😊")
-        elif len(st.session_state.user_interests)==0:
-            st.warning(" Bislang keine Interessen, bitte wählen welche aus 😊")
-        else:
-            st.session_state.setup_complete = True
-            st.success("Perfekt! Deine personalisierte München-Map wird vorbereitet...")
-            st.experimental_rerun()
-
-    st.write()
-
-
-# --- Jetzt Setup config ---
-st.set_page_config(page_title="Munich Vibe Guide", page_icon="🥨", layout="wide")
-
-# --- DATA LOADING ---
+# getting data
 @st.cache_data
 def load_data():
     try:
-        # Load data from the CSV file
         df = pd.read_csv("places-in-munich.csv")
         return df
     except FileNotFoundError:
-        st.error("Could not find 'places-in-munich.csv'. Please make sure the file exists in the same folder.")
-        return pd.DataFrame() 
+        return pd.DataFrame()
 
 df = load_data()
 
-# --- HELPER FUNCTIONS ---
+
 def text_to_speech(text):
-    """Generates audio from text using Google TTS."""
-    tts = gTTS(text=text, lang='en')
-    audio_fp = io.BytesIO()
-    tts.write_to_fp(audio_fp)
-    return audio_fp
+    try:
+        tts = gTTS(text=text, lang='en')
+        audio_fp = io.BytesIO()
+        tts.write_to_fp(audio_fp)
+        return audio_fp
+    except:
+        return None
 
-def get_route_stats(points_df):
-    """Calculates total distance and estimated walking time."""
-    if len(points_df) < 2:
-        return 0, 0
-    total_dist_km = 0
-    for i in range(len(points_df) - 1):
-        p1 = (points_df.iloc[i]['lat'], points_df.iloc[i]['lon'])
-        p2 = (points_df.iloc[i+1]['lat'], points_df.iloc[i+1]['lon'])
-        total_dist_km += geodesic(p1, p2).km
+@st.cache_data
+def get_osrm_route(locations):
+    if not locations: return []
+    try:
+        loc_string = ";".join([f"{lon},{lat}" for lat, lon in locations])
+        url = f"http://router.project-osrm.org/route/v1/foot/{loc_string}?overview=full&geometries=polyline"
+        r = requests.get(url, timeout=2)
+        if r.status_code == 200:
+            res = r.json()
+            encoded = res['routes'][0]['geometry']
+            decoded = polyline.decode(encoded)
+            return [[lon, lat] for lat, lon in decoded]
+    except:
+        pass
+    return [[lon, lat] for lat, lon in locations]
+
+def optimize_route_ordering(df):
+    """
+    Orders points using a Nearest Neighbor approach (TSP approximation).
+    Start point: Closest to Marienplatz.
+    Next point: Closest unvisited neighbor.
+    """
+    if len(df) < 3:
+        return df
+        
+    points = df.to_dict('records')
     
-    # Avg walking speed ~5 km/h
-    duration_min = int((total_dist_km / 5) * 60) 
-    return total_dist_km, duration_min
+    # 1. Find start node (Closest to City Center/Marienplatz)
+    marienplatz = (48.1372, 11.5755)
+    start_node = min(points, key=lambda p: geodesic((p['lat'], p['lon']), marienplatz).km)
+    
+    # 2. Nearest Neighbor Algorithm
+    ordered_path = [start_node]
+    points.remove(start_node)
+    
+    while points:
+        current = ordered_path[-1]
+        # Find nearest unvisited neighbor
+        nearest = min(points, key=lambda p: geodesic((current['lat'], current['lon']), (p['lat'], p['lon'])).km)
+        ordered_path.append(nearest)
+        points.remove(nearest)
+        
+    return pd.DataFrame(ordered_path)
 
-# --- SIDEBAR ---
-st.sidebar.title("🦁 Munich Explorer")
-st.sidebar.header("Customize Your Walk")
+# 1. WELCOME SCREEN (SETUP)
+if not st.session_state.setup_complete:
+    st.title("Hey und Willkommen! 🦁")
+    st.subheader("Erschaffe deine persönliche Munich Experience")
 
-if not df.empty:
-    interest = st.sidebar.radio(
-        "What is the purpose of today's walk?",
-        df['category'].unique() # Dynamically get categories from CSV
+    st.session_state.user_name = st.text_input(
+        "Wie dürfen wir dich nennen?", placeholder="Dein Name"
     )
 
-    mode = st.sidebar.selectbox(
-        "Choose your Mode:",
-        ["🧭 Fixed Path (Guided)", "🎲 Spontaneous (Discovery)"]
+    st.markdown("### Verrate uns deine Interessen")
+    
+    # Mapping categories from CSV to display names if needed, 
+    # or just using CSV categories directly. 
+    # For this code, we use the categories found in the CSV + some extras from your team's list.
+    available_categories = list(df['category'].unique()) if not df.empty else []
+    
+    st.session_state.user_interests = st.multiselect(
+        "Was interessiert dich am meisten?",
+        available_categories,
+        default=available_categories[:1] # Select first by default
     )
 
-    # Filter Data based on Interest
-    filtered_df = df[df['category'] == interest]
+    st.markdown("### Modus")
+    mode_selection = st.radio(
+        "Wie möchtest du geführt werden?",
+        ["🧭 Proaktiver Modus (Automatische Route)",
+         "🎲 Nur Präferenzen (Freie Entdeckung)"]
+    )
+    
+    # Map the long text to simple internal keys
+    if "Proaktiver" in mode_selection:
+        st.session_state.user_mode = "Guided"
+    else:
+        st.session_state.user_mode = "Spontaneous"
 
-    # --- MAIN APP ---
-    st.title(f"Munich {interest} Walk")
+    st.write("---")
 
-    # --- MODE 1: FIXED PATH ---
-    if mode == "🧭 Fixed Path (Guided)":
-        st.info(f"We curated a perfect **{interest}** route for you.")
-
-        # Calculate Stats
-        dist, duration = get_route_stats(filtered_df)
-        col1, col2 = st.columns(2)
-        col1.metric("Total Distance", f"{dist:.2f} km")
-        col2.metric("Est. Duration", f"{duration} min")
-
-        # Map Layer: Scatterplot (Points) + PathLayer (Route)
-        layer_points = pdk.Layer(
-            "ScatterplotLayer",
-            filtered_df,
-            get_position='[lon, lat]',
-            get_color='[200, 30, 0, 160]',
-            get_radius=50,
-            pickable=True
-        )
-
-        # Create path data (list of coordinates)
-        path_data = [{"path": filtered_df[['lon', 'lat']].values.tolist()}]
-
-        layer_path = pdk.Layer(
-            "PathLayer",
-            path_data,
-            get_path="path",
-            get_color='[0, 0, 255, 200]',
-            width_scale=20,
-            width_min_pixels=2,
-            pickable=True
-        )
-
-
-
-        # Render Map
-        st.pydeck_chart(pdk.Deck(
-            map_style='mapbox://styles/mapbox/light-v9',
-            initial_view_state=pdk.ViewState(
-                latitude=48.145,
-                longitude=11.58,
-                zoom=13,
-                pitch=0,
-            ),
-            layers=[layer_path, layer_points],
-            tooltip={"text": "{name}\n{desc}"}
-        ))
-
-        st.subheader("Stops along the way:")
-        for i, row in filtered_df.iterrows():
-            with st.expander(f"{i+1}. {row['name']}"):
-                st.write(row['desc'])
-                if st.button(f"🔊 Listen to Info for {row['name']}", key=f"btn_{i}"):
-                    audio_data = text_to_speech(row['desc'])
-                    st.audio(audio_data, format="audio/mp3")
-
-    # +filter+ nach indivd. nutzerinteressen
-    filtered_df = df[df['category'].isin(st.session_state.user_interests)]
-
-    # Sortieren nach live Entfernung
-    filtered_df['distance_km'] = filtered_df.apply(
-        lambda row: geodesic((row['lat'], row['lon']), (current_lat, current_lon)).km,axis=1)
-
-    filtered_df = filtered_df.sort_values('distance_km')
-    if filtered_df.empty:
-        st.warning("Leider haben wir keine passenden Orte für deine Interessen gefunden, stay tuned")
-
-
-
-
-
-    # --- MODE 2: SPONTANEOUS ---
-    elif mode == "🎲 Spontaneous (Discovery)":
-        st.success("Start walking! We will notify you when you pass something cool.")
-
-        # Simulation Slider (Essential for Hackathon Demos!)
-        st.markdown("### 🚶‍♂️ Simulation: Walk through the city")
-        progress = st.slider("Move the slider to simulate walking south-north:", 0, 100, 0)
-
-        # Simulate a user walking from Marienplatz (south) northwards
-        start_lat, start_lon = 48.1351, 11.575  # Near Marienplatz
-        current_lat = start_lat + (progress * 0.0003) # Moving North slightly
-        current_lon = start_lon + (progress * 0.0001) # Moving East slightly
-
-        user_pos = pd.DataFrame([{"lat": current_lat, "lon": current_lon, "name": "You"}])
-
-        # Check proximity to any interesting point
-        proximity_threshold_km = 0.3 # 300 meters
-        nearby_place = None
-
-        for _, row in filtered_df.iterrows():
-            place_loc = (row['lat'], row['lon'])
-            user_loc = (current_lat, current_lon)
-            distance = geodesic(place_loc, user_loc).km
-
-            if distance < proximity_threshold_km:
-                nearby_place = row
-                break
-
-        # Map Layer: User + All Potential Interest Points
-        layer_user = pdk.Layer(
-            "ScatterplotLayer",
-            user_pos,
-            get_position='[lon, lat]',
-            get_color='[0, 128, 255, 200]', # Blue for user
-            get_radius=80,
-            pickable=True,
-        )
-
-        layer_targets = pdk.Layer(
-            "ScatterplotLayer",
-            filtered_df,
-            get_position='[lon, lat]',
-            get_color='[255, 140, 0, 160]', # Orange for targets
-            get_radius=50,
-            pickable=True
-        )
-
-        st.pydeck_chart(pdk.Deck(
-            map_style='mapbox://styles/mapbox/light-v9',
-            initial_view_state=pdk.ViewState(
-                latitude=current_lat,
-                longitude=current_lon,
-                zoom=14,
-                pitch=40,
-            ),
-            layers=[layer_user, layer_targets],
-            tooltip={"text": "{name}"}
-        ))
-
-        # --- THE "EVENT" TRIGGER ---
-        if nearby_place is not None:
-            st.toast(f"📍 You are near {nearby_place['name']}!", icon="🎉")
-
-            with st.container():
-                st.markdown(f"## 🏛️ Found: {nearby_place['name']}")
-                st.write(f"**Why it fits your '{interest}' walk:**")
-                st.write(nearby_place['desc'])
-
-                col_audio, col_action = st.columns([1, 3])
-                with col_audio:
-                    st.markdown("Listen to the story:")
-                    # Auto-generate audio only when near
-                    audio_bytes = text_to_speech(f"Hey! You just discovered {nearby_place['name']}. {nearby_place['desc']}")
-                    st.audio(audio_bytes, format='audio/mp3', start_time=0)
+    if st.button("Los gehts!"):
+        if st.session_state.user_name == "":
+            st.warning("Bitte gib Deinen Namen ein 😊")
+        elif len(st.session_state.user_interests) == 0:
+            st.warning("Bitte wähle mindestens ein Interesse aus 😊")
         else:
-            st.markdown("*Keep walking... nothing nearby yet.*")
+            st.session_state.setup_complete = True
+            st.success("Perfekt! Deine Map wird vorbereitet...")
+            st.rerun()
+
+# 2. MAIN APP (AFTER SETUP)
 else:
-    st.warning("Data not loaded. Please ensure 'places-in-munich.csv' is in the directory.")
+    if df.empty:
+        st.error("CSV not found! Please check places-in-munich.csv")
+    else:
+        # --- FILTER DATA ---
+        # Filter by ALL selected interests
+        filtered_df = df[df['category'].isin(st.session_state.user_interests)].copy()
+        
+        # Reset Button (Top Right logic via Expander)
+        with st.expander(f"👤 Profil: {st.session_state.user_name}", expanded=False):
+            st.write(f"**Interessen:** {', '.join(st.session_state.user_interests)}")
+            st.write(f"**Modus:** {st.session_state.user_mode}")
+            if st.button("Profil zurücksetzen"):
+                st.session_state.setup_complete = False
+                st.session_state.visited = []
+                st.rerun()
+
+        st.markdown(f"## Dein Munich Walk")
+        
+        layers = []
+        # Default Center
+        view_state = pdk.ViewState(latitude=48.137, longitude=11.575, zoom=13, pitch=45)
+
+        # MODE A: GUIDED PATH (Proaktiver Modus)
+        if st.session_state.user_mode == "Guided":
+            st.caption("Folge der blauen Linie zu deinen Zielen.")
+            
+            if not filtered_df.empty:
+                # --- ADDED OPTIMIZATION CALL HERE ---
+                filtered_df = optimize_route_ordering(filtered_df)
+                
+                # Route Calculation
+                route_points = list(zip(filtered_df['lat'], filtered_df['lon']))
+                real_path = get_osrm_route(route_points)
+                
+                # Layer 1: The Path
+                layers.append(pdk.Layer(
+                    "PathLayer",
+                    data=[{"path": real_path}],
+                    get_path="path",
+                    get_color='[0, 150, 255, 200]',
+                    width_scale=10,
+                    width_min_pixels=3
+                ))
+                
+                # Layer 2: Numbered Markers
+                filtered_df['idx'] = range(1, len(filtered_df) + 1)
+                layers.append(pdk.Layer(
+                    "ScatterplotLayer",
+                    filtered_df,
+                    get_position='[lon, lat]',
+                    get_color='[255, 255, 255]',
+                    get_line_color='[0, 150, 255]',
+                    get_line_width=20,
+                    get_radius=60,
+                    pickable=True
+                ))
+                layers.append(pdk.Layer(
+                    "TextLayer",
+                    filtered_df,
+                    get_position='[lon, lat]',
+                    get_text='idx',
+                    get_color=[0, 0, 0],
+                    get_size=18,
+                    get_alignment_baseline="'center'"
+                ))
+                
+                # Center map on first point
+                view_state.latitude = filtered_df.iloc[0]['lat']
+                view_state.longitude = filtered_df.iloc[0]['lon']
+
+        # MODE B: SPONTANEOUS (Nur Präferenzen)
+        else:
+            st.caption("Nutze die Slider zum Navigieren. Orte erscheinen, wenn du nah bist!")
+            
+            # Two sliders for navigation
+            col_nav1, col_nav2 = st.columns(2)
+            with col_nav1:
+                lat_val = st.slider("↕️ Nord-Süd", 0, 100, 50)
+            with col_nav2:
+                lon_val = st.slider("↔️ West-Ost", 0, 100, 50)
+            
+            # Calculate User Position (Ursprung: Marienplatz Center)
+            user_lat = 48.1370 + ((lat_val - 50) * 0.0004)
+            user_lon = 11.5750 + ((lon_val - 50) * 0.0006)
+            
+            # Check Proximity Logic
+            nearby_place = None
+            for _, row in filtered_df.iterrows():
+                if geodesic((row['lat'], row['lon']), (user_lat, user_lon)).km < 0.25: # 250m radius
+                    nearby_place = row
+                    if row['name'] not in st.session_state.visited:
+                        st.session_state.visited.append(row['name'])
+            
+            # Layer 1: User Avatar
+            layers.append(pdk.Layer(
+                "ScatterplotLayer",
+                data=[{"lon": user_lon, "lat": user_lat}],
+                get_position='[lon, lat]',
+                get_color='[0, 150, 255, 150]',
+                get_radius=100, 
+            ))
+            layers.append(pdk.Layer(
+                "ScatterplotLayer",
+                data=[{"lon": user_lon, "lat": user_lat}],
+                get_position='[lon, lat]',
+                get_color='[255, 255, 255, 255]',
+                get_radius=30, 
+            ))
+
+            # Layer 2: Discovered Spots (Green)
+            discovered_df = filtered_df[filtered_df['name'].isin(st.session_state.visited)]
+            if not discovered_df.empty:
+                layers.append(pdk.Layer(
+                    "ScatterplotLayer",
+                    discovered_df,
+                    get_position='[lon, lat]',
+                    get_color='[0, 255, 100, 200]',
+                    get_radius=60,
+                    pickable=True
+                ))
+            
+            # Update View to follow user
+            view_state.latitude = user_lat
+            view_state.longitude = user_lon
+            view_state.zoom = 15
+            view_state.bearing = 0
+
+            # Notifications
+            if nearby_place is not None:
+                st.success(f"Gefunden: {nearby_place['name']}!")
+                if st.button("🔊 Infos anhören"):
+                    aud = text_to_speech(nearby_place['desc'])
+                    if aud: st.audio(aud, format='audio/mp3')
+
+        # Map
+        if MAPBOX_API_KEY:
+            map_style = "mapbox://styles/mapbox/dark-v10"
+            api_keys = {"mapbox": MAPBOX_API_KEY}
+        else:
+            map_style = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json" 
+            api_keys = None
+
+        st.pydeck_chart(pdk.Deck(
+            map_style=map_style,
+            initial_view_state=view_state,
+            layers=layers,
+            api_keys=api_keys,
+            tooltip={"text": "{name}"}
+        ), height=400) 
+
+        # LIST OF STOPS (Guided Only)
+        if st.session_state.user_mode == "Guided":
+            st.markdown("### Deine Route")
+            for i, row in filtered_df.iterrows():
+                with st.expander(f"{i+1}. {row['name']}"):
+                    st.write(row['desc'])
+                    if st.button("🔊 Audio", key=f"btn_{i}"):
+                        aud = text_to_speech(row['desc'])
+                        if aud: st.audio(aud, format='audio/mp3')
