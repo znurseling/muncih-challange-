@@ -6,6 +6,8 @@ from gtts import gTTS
 import io
 import requests
 import polyline
+from streamlit_js_eval import get_geolocation
+
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="CityTour Munich", layout="centered")
@@ -194,88 +196,47 @@ else:
                 st.rerun()
 
         st.markdown(f"## Your Munich Walk")
+
+        #gps 
+        use_gps = st.toggle("🛰️ Use Real GPS", value=False)
         
-        layers = []
-        view_state = pdk.ViewState(latitude=48.137, longitude=11.575, zoom=13, pitch=45)
+        @st.fragment(run_every=3 if use_gps else None)
+        def view_map_logic(filtered_df):
+            # Default location 
+            user_lat = 48.1370 
+            user_lon = 11.5750
 
-        # mode 1 -> guided path (Proaktiver Modus)
-        if st.session_state.user_mode == "Guided":
-            st.caption("Follow the blue line to reach your Target.")
-            
-            if not filtered_df.empty:
-                # optimize the nodes
-                filtered_df = optimize_route_ordering(filtered_df)
-                
-                # Calculate Route
-                route_points = list(zip(filtered_df['lat'], filtered_df['lon']))
-                real_path = get_osrm_route(route_points)
-                
-                # The Path
-                layers.append(pdk.Layer(
-                    "PathLayer",
-                    data=[{"path": real_path}],
-                    get_path="path",
-                    get_color='[0, 150, 255, 200]',
-                    width_scale=10,
-                    width_min_pixels=3
-                ))
-                
-                # Numbered Points
-                filtered_df['idx'] = range(1, len(filtered_df) + 1)
-                layers.append(pdk.Layer(
-                    "ScatterplotLayer",
-                    filtered_df,
-                    get_position='[lon, lat]',
-                    get_color='[255, 255, 255]',
-                    get_line_color='[0, 150, 255]',
-                    get_line_width=20,
-                    get_radius=60,
-                    pickable=True
-                ))
-                layers.append(pdk.Layer(
-                    "TextLayer",
-                    filtered_df,
-                    get_position='[lon, lat]',
-                    get_text='idx',
-                    get_color=[0, 0, 0],
-                    get_size=18,
-                    get_alignment_baseline="'center'"
-                ))
-                
-                # Center map on first point
-                view_state.latitude = filtered_df.iloc[0]['lat']
-                view_state.longitude = filtered_df.iloc[0]['lon']
+            if use_gps:
+                loc = get_geolocation()
+                if loc:
+                    user_lat = loc['coords']['latitude']
+                    user_lon = loc['coords']['longitude']
+                    st.toast(f" GPS Updated", icon="📡")
+                else:
+                    st.warning("Waiting for GPS...")
 
-        # mode 2 -> spontaneuos (explore as you go)
-        else:
-            st.caption("Use the Slider to move, the places should appear if you get close to them!")
+            else:
+                st.caption("Simulation Mode: Use sliders to move.") #if no gps then use the simulation mode to move around
+                col_nav1, col_nav2 = st.columns(2)
+                with col_nav1:
+                    lat_val = st.slider("↕️ North-South", 0, 100, 50)
+                with col_nav2:
+                    lon_val = st.slider("↔️ West-East", 0, 100, 50)
+                
+                user_lat = 48.1370 + ((lat_val - 50) * 0.0004)
+                user_lon = 11.5750 + ((lon_val - 50) * 0.0006)
+
             
-            # Two sliders
-            col_nav1, col_nav2 = st.columns(2)
-            with col_nav1:
-                lat_val = st.slider("↕️ Nord-Süd", 0, 100, 50)
-            with col_nav2:
-                lon_val = st.slider("↔️ West-Ost", 0, 100, 50)
-            
-            # User Position (Ursprung: Marienplatz Center)
-            user_lat = 48.1370 + ((lat_val - 50) * 0.0004)
-            user_lon = 11.5750 + ((lon_val - 50) * 0.0006)
-            
-            # Check Proximity Logic
-            nearby_place = None
-            for _, row in filtered_df.iterrows():
-                if geodesic((row['lat'], row['lon']), (user_lat, user_lon)).km < 0.25: # 250m radius
-                    nearby_place = row
-                    if row['name'] not in st.session_state.visited:
-                        st.session_state.visited.append(row['name'])
-            
-            # Layer 1: User Avatar
+            layers = []
+            view_state = pdk.ViewState(latitude=user_lat, longitude=user_lon, zoom=20, pitch=45)
+
+            # User Avatar Layer
             layers.append(pdk.Layer(
                 "ScatterplotLayer",
                 data=[{"lon": user_lon, "lat": user_lat}],
                 get_position='[lon, lat]',
-                get_color='[0, 150, 255, 150]',
-                get_radius=100, 
+                get_color='[0, 128, 255, 200]', 
+                get_radius=15,
             ))
             layers.append(pdk.Layer(
                 "ScatterplotLayer",
@@ -285,48 +246,99 @@ else:
                 get_radius=30, 
             ))
 
-            # Discovered points (Green)
-            discovered_df = filtered_df[filtered_df['name'].isin(st.session_state.visited)]
-            if not discovered_df.empty:
-                layers.append(pdk.Layer(
-                    "ScatterplotLayer",
-                    discovered_df,
-                    get_position='[lon, lat]',
-                    get_color='[0, 255, 100, 200]',
-                    get_radius=60,
-                    pickable=True
-                ))
-            
-            # follow user as they move
-            view_state.latitude = user_lat
-            view_state.longitude = user_lon
-            view_state.zoom = 15
-            view_state.bearing = 0
+            # mode 1 -> guided path (Proaktiver Modus)
+            if st.session_state.user_mode == "Guided":
+                st.caption("Follow the blue line to reach your Target.")
+                
+                if not filtered_df.empty:
+                    # Optimize Route
+                    df_opt = optimize_route_ordering(filtered_df)
+                    
+                    route_points = list(zip(df_opt['lat'], df_opt['lon']))
+                    
+                    # Connect user to route
+                    if use_gps or True: 
+                        route_points.insert(0, (user_lat, user_lon))
 
-            # Notifications
-            if nearby_place is not None:
-                st.success(f"Found: {nearby_place['name']}!")
-                if st.button("🔊 Listen the information"):
-                    aud = text_to_speech(nearby_place['desc'])
-                    if aud: st.audio(aud, format='audio/mp3')
+                    real_path = get_osrm_route(route_points)
+                    
+                    layers.append(pdk.Layer(
+                        "PathLayer",
+                        data=[{"path": real_path}],
+                        get_path="path",
+                        get_color='[0, 150, 255, 200]',
+                        width_scale=10,
+                        width_min_pixels=3
+                    ))
+                    
+                    df_opt['idx'] = range(1, len(df_opt) + 1)
+                    layers.append(pdk.Layer(
+                        "ScatterplotLayer",
+                        df_opt,
+                        get_position='[lon, lat]',
+                        get_color='[255, 255, 255]',
+                        get_line_color='[0, 150, 255]',
+                        get_line_width=20,
+                        get_radius=60,
+                        pickable=True
+                    ))
+                    layers.append(pdk.Layer(
+                        "TextLayer",
+                        df_opt,
+                        get_position='[lon, lat]',
+                        get_text='idx',
+                        get_color=[0, 0, 0],
+                        get_size=18,
+                        get_alignment_baseline="'center'"
+                    ))
 
-        # Map
-        if MAPBOX_API_KEY:
-            map_style = "mapbox://styles/mapbox/dark-v10"
-            api_keys = {"mapbox": MAPBOX_API_KEY}
-        else:
-            map_style = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json" 
-            api_keys = None
+            # mode 2 -> spontaneuos (explore as you go)
+            else:
+                st.caption("Use the Slider to move, places appear when you get close!")
+                nearby_place = None
+                for _, row in filtered_df.iterrows():
+                    if geodesic((row['lat'], row['lon']), (user_lat, user_lon)).km < 0.25:
+                        nearby_place = row
+                        if row['name'] not in st.session_state.visited:
+                            st.session_state.visited.append(row['name'])
+                
+                discovered_df = filtered_df[filtered_df['name'].isin(st.session_state.visited)]
+                if not discovered_df.empty:
+                    layers.append(pdk.Layer(
+                        "ScatterplotLayer",
+                        discovered_df,
+                        get_position='[lon, lat]',
+                        get_color='[0, 255, 100, 200]',
+                        get_radius=60,
+                        pickable=True
+                    ))
 
-        st.pydeck_chart(pdk.Deck(
-            map_style=map_style,
-            initial_view_state=view_state,
-            layers=layers,
-            api_keys=api_keys,
-            tooltip={"text": "{name}"}
-        ), height=400) 
+                if nearby_place is not None:
+                    st.success(f"Found: {nearby_place['name']}!")
+                    if st.button("🔊 Listen the information"):
+                        aud = text_to_speech(nearby_place['desc'])
+                        if aud: st.audio(aud, format='audio/mp3')
 
-        # LIST OF STOPS 
+            # Render Map
+            if MAPBOX_API_KEY:
+                map_style = "mapbox://styles/mapbox/dark-v10"
+                api_keys = {"mapbox": MAPBOX_API_KEY}
+            else:
+                map_style = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json" 
+                api_keys = None
+
+            st.pydeck_chart(pdk.Deck(
+                map_style=map_style,
+                initial_view_state=view_state,
+                layers=layers,
+                api_keys=api_keys,
+                tooltip={"text": "{name}"}
+            ), height=400) 
+
+        # CALL THE FRAGMENT
+        view_map_logic(filtered_df)
+
+        # LIST OF STOPS (Outside fragment)
         if st.session_state.user_mode == "Guided":
             st.markdown("### Your route")
             for i, row in filtered_df.iterrows():
