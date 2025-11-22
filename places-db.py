@@ -1,5 +1,5 @@
 import pandas as pd
-#just a example db
+
 def create_munich_dataset():
     data = [
         # Nature
@@ -25,9 +25,8 @@ def create_munich_dataset():
     ]
     
     df = pd.DataFrame(data)
-
     df.to_csv("places-in-munich.csv", index=False)
-    print("created places-in-munich.csv")
+    print("'places-in-munich.csv' has been created.")
 
 if __name__ == "__main__":
     create_munich_dataset()
