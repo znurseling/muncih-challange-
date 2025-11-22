@@ -5,7 +5,64 @@ from geopy.distance import geodesic
 from gtts import gTTS
 import io
 
-# --- CONFIGURATION ---
+# WELCOME SCREEN
+
+if "setup_complete" not in st.session_state:
+    st.session_state.setup_complete = False
+if "user_name" not in st.session_state:
+    st.session_state.user_name = ""
+if "user_interests" not in st.session_state:
+    st.session_state.user_interests = []
+if "user_mode" not in st.session_state:
+    st.session_state.user_mode = ""
+
+# vor setup welcome page
+if not st.session_state.setup_complete:
+    st.title("Hey und Willkommen beim neuen Munich Explorer")
+    st.subheader("Erschaffe deine persönliche München Exprience")
+
+    st.session_state.user_name = st.text_input(
+        "Wie dürfen wir dich nennen?", placeholder= "Dein name"
+    )
+
+    st.markdown("## Verrate uns Interessen")
+    all_interests = ["Architektur",
+                     "Geschichte",
+                     "Natur",
+                     "Ruhe / Entspannung",
+                     "Barrierefreiheit",
+                     "Stadtbild",
+                     "Biodiversität",
+                     "Umwelt (Luft, Lärm, Hitze)",
+                     "Kulturelle Events"
+                     ]
+
+    st.session_state.user_interests = st.multiselect(
+        "Was interessiert dich auf deinem Spaziergang am meisten?",
+        all_interests
+    )
+    st.markdown("Mode")
+    st.session_state.user_mode = st.radio(
+        "Wie möchtest du geführt werden?",
+        ["🧭 Proaktiver Modus (Wir schlagen dir Dinge automatisch vor)",
+         "📘 Nur Präferenzen (Du entscheidest selbst)"]
+    )
+    st.write("---")
+
+    if st.button("Los gehts!"):
+        if st.session_state.user_name=="":
+            st.warning("Bitte gebe Deinen Namen ein 😊")
+        elif len(st.session_state.user_interests)==0:
+            st.warning(" Bislang keine Interessen, bitte wählen welche aus 😊")
+        else:
+            st.session_state.setup_complete = True
+            st.success("Perfekt! Deine personalisierte München-Map wird vorbereitet...")
+            st.experimental_rerun()
+
+    st.write()
+
+
+# --- Jetzt Setup config ---
 st.set_page_config(page_title="Munich Vibe Guide", page_icon="🥨", layout="wide")
 
 # --- DATA LOADING ---
@@ -67,7 +124,7 @@ if not df.empty:
     # --- MODE 1: FIXED PATH ---
     if mode == "🧭 Fixed Path (Guided)":
         st.info(f"We curated a perfect **{interest}** route for you.")
-        
+
         # Calculate Stats
         dist, duration = get_route_stats(filtered_df)
         col1, col2 = st.columns(2)
@@ -86,7 +143,7 @@ if not df.empty:
 
         # Create path data (list of coordinates)
         path_data = [{"path": filtered_df[['lon', 'lat']].values.tolist()}]
-        
+
         layer_path = pdk.Layer(
             "PathLayer",
             path_data,
@@ -118,30 +175,45 @@ if not df.empty:
                     audio_data = text_to_speech(row['desc'])
                     st.audio(audio_data, format="audio/mp3")
 
+    # +filter+ nach indivd. nutzerinteressen
+    filtered_df = df[df['category'].isin(st.session_state.user_interests)]
+
+    # Sortieren nach live Entfernung
+    filtered_df['distance_km'] = filtered_df.apply(
+        lambda row: geodesic((row['lat'], row['lon']), (current_lat, current_lon)).km,axis=1)
+
+    filtered_df = filtered_df.sort_values('distance_km')
+    if filtered_df.empty:
+        st.warning("Leider haben wir keine passenden Orte für deine Interessen gefunden, stay tuned")
+
+
+
+
+
     # --- MODE 2: SPONTANEOUS ---
     elif mode == "🎲 Spontaneous (Discovery)":
         st.success("Start walking! We will notify you when you pass something cool.")
-        
+
         # Simulation Slider (Essential for Hackathon Demos!)
         st.markdown("### 🚶‍♂️ Simulation: Walk through the city")
         progress = st.slider("Move the slider to simulate walking south-north:", 0, 100, 0)
-        
+
         # Simulate a user walking from Marienplatz (south) northwards
         start_lat, start_lon = 48.1351, 11.575  # Near Marienplatz
         current_lat = start_lat + (progress * 0.0003) # Moving North slightly
         current_lon = start_lon + (progress * 0.0001) # Moving East slightly
-        
+
         user_pos = pd.DataFrame([{"lat": current_lat, "lon": current_lon, "name": "You"}])
 
         # Check proximity to any interesting point
         proximity_threshold_km = 0.3 # 300 meters
         nearby_place = None
-        
+
         for _, row in filtered_df.iterrows():
             place_loc = (row['lat'], row['lon'])
             user_loc = (current_lat, current_lon)
             distance = geodesic(place_loc, user_loc).km
-            
+
             if distance < proximity_threshold_km:
                 nearby_place = row
                 break
@@ -155,7 +227,7 @@ if not df.empty:
             get_radius=80,
             pickable=True,
         )
-        
+
         layer_targets = pdk.Layer(
             "ScatterplotLayer",
             filtered_df,
@@ -180,12 +252,12 @@ if not df.empty:
         # --- THE "EVENT" TRIGGER ---
         if nearby_place is not None:
             st.toast(f"📍 You are near {nearby_place['name']}!", icon="🎉")
-            
+
             with st.container():
                 st.markdown(f"## 🏛️ Found: {nearby_place['name']}")
                 st.write(f"**Why it fits your '{interest}' walk:**")
                 st.write(nearby_place['desc'])
-                
+
                 col_audio, col_action = st.columns([1, 3])
                 with col_audio:
                     st.markdown("Listen to the story:")
