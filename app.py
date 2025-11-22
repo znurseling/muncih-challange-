@@ -7,7 +7,7 @@ import io
 import requests
 import polyline
 from streamlit_js_eval import get_geolocation
-
+import time 
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="CityTour Munich", layout="centered")
@@ -70,6 +70,12 @@ if "user_mode" not in st.session_state:
     st.session_state.user_mode = ""
 if "visited" not in st.session_state:
     st.session_state.visited = []
+
+# Initialize last known location (Prevents map flickering)
+if "last_lat" not in st.session_state:
+    st.session_state.last_lat = 48.1370 
+if "last_lon" not in st.session_state:
+    st.session_state.last_lon = 11.5750 
 
 # getting data
 @st.cache_data
@@ -197,26 +203,40 @@ else:
 
         st.markdown(f"## Your Munich Walk")
 
-        #gps 
+        # GPS Toggle 
         use_gps = st.toggle("🛰️ Use Real GPS", value=False)
         
         @st.fragment(run_every=3 if use_gps else None)
         def view_map_logic(filtered_df):
-            # Default location 
-            user_lat = 48.1370 
-            user_lon = 11.5750
+            # start location 
+            user_lat = st.session_state.last_lat 
+            user_lon = st.session_state.last_lon
 
             if use_gps:
-                loc = get_geolocation()
+                # --- FIXED GPS LOGIC ---
+                # 1. Init key if needed
+                if 'gps_key' not in st.session_state:
+                    st.session_state.gps_key = f"gps_{time.time()}"
+                
+                # 2. Ask for location using CURRENT key
+                loc = get_geolocation(component_key=st.session_state.gps_key)
+                
                 if loc:
                     user_lat = loc['coords']['latitude']
                     user_lon = loc['coords']['longitude']
+                    # Save valid location
+                    st.session_state.last_lat = user_lat
+                    st.session_state.last_lon = user_lon
+                    
+                    # 3. ONLY NOW generate new key for NEXT update
+                    st.session_state.gps_key = f"gps_{time.time()}"
                     st.toast(f" GPS Updated", icon="📡")
                 else:
+                    # If None, it means "Waiting for phone to answer".
+                    # DO NOT change the key here, or we lose the answer!
                     st.warning("Waiting for GPS...")
-
             else:
-                st.caption("Simulation Mode: Use sliders to move.") #if no gps then use the simulation mode to move around
+                st.caption("Simulation Mode: Use sliders to move.") 
                 col_nav1, col_nav2 = st.columns(2)
                 with col_nav1:
                     lat_val = st.slider("↕️ North-South", 0, 100, 50)
@@ -225,10 +245,13 @@ else:
                 
                 user_lat = 48.1370 + ((lat_val - 50) * 0.0004)
                 user_lon = 11.5750 + ((lon_val - 50) * 0.0006)
+                
+                st.session_state.last_lat = user_lat
+                st.session_state.last_lon = user_lon
 
             
             layers = []
-            view_state = pdk.ViewState(latitude=user_lat, longitude=user_lon, zoom=20, pitch=45)
+            view_state = pdk.ViewState(latitude=user_lat, longitude=user_lon, zoom=17, pitch=45)
 
             # User Avatar Layer
             layers.append(pdk.Layer(
@@ -236,14 +259,14 @@ else:
                 data=[{"lon": user_lon, "lat": user_lat}],
                 get_position='[lon, lat]',
                 get_color='[0, 128, 255, 200]', 
-                get_radius=15,
+                get_radius=3, 
             ))
             layers.append(pdk.Layer(
                 "ScatterplotLayer",
                 data=[{"lon": user_lon, "lat": user_lat}],
                 get_position='[lon, lat]',
                 get_color='[255, 255, 255, 255]',
-                get_radius=30, 
+                get_radius=1, 
             ))
 
             # mode 1 -> guided path (Proaktiver Modus)
@@ -267,7 +290,7 @@ else:
                         data=[{"path": real_path}],
                         get_path="path",
                         get_color='[0, 150, 255, 200]',
-                        width_scale=10,
+                        width_scale=5,
                         width_min_pixels=3
                     ))
                     
@@ -279,7 +302,7 @@ else:
                         get_color='[255, 255, 255]',
                         get_line_color='[0, 150, 255]',
                         get_line_width=20,
-                        get_radius=60,
+                        get_radius=5,
                         pickable=True
                     ))
                     layers.append(pdk.Layer(
@@ -288,7 +311,7 @@ else:
                         get_position='[lon, lat]',
                         get_text='idx',
                         get_color=[0, 0, 0],
-                        get_size=18,
+                        get_size=14,
                         get_alignment_baseline="'center'"
                     ))
 
@@ -297,7 +320,7 @@ else:
                 st.caption("Use the Slider to move, places appear when you get close!")
                 nearby_place = None
                 for _, row in filtered_df.iterrows():
-                    if geodesic((row['lat'], row['lon']), (user_lat, user_lon)).km < 0.25:
+                    if geodesic((row['lat'], row['lon']), (user_lat, user_lon)).km < 0.15:
                         nearby_place = row
                         if row['name'] not in st.session_state.visited:
                             st.session_state.visited.append(row['name'])
@@ -309,7 +332,7 @@ else:
                         discovered_df,
                         get_position='[lon, lat]',
                         get_color='[0, 255, 100, 200]',
-                        get_radius=60,
+                        get_radius=5,
                         pickable=True
                     ))
 
@@ -335,8 +358,8 @@ else:
                 tooltip={"text": "{name}"}
             ), height=400) 
 
-        # CALL THE FRAGMENT
-        view_map_logic(filtered_df)
+        # CALL THE FRAGMENTp
+        
 
         # LIST OF STOPS (Outside fragment)
         if st.session_state.user_mode == "Guided":
