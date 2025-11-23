@@ -86,6 +86,15 @@ def load_data():
     except FileNotFoundError:
         return pd.DataFrame()
 
+from landmarks import Landmark
+import time
+
+landmark_list =[
+    Landmark("Eisbachwelle", 48.1435, 11.5877, "A famous river wave...", category="Nature"),
+    Landmark("Monopteros", 48.1539, 11.5963, "Greek-style temple...", category="Nature"),
+    Landmark("Friedensengel", 48.1550, 11.5940, "Angel statue...", category="Historical")
+]
+
 @st.cache_data
 def load_air_quality_data():
     try:
@@ -361,6 +370,18 @@ else:
             user_lat = 48.1370 + ((lat_val - 50) * 0.0004)
             user_lon = 11.5750 + ((lon_val - 50) * 0.0006)
 
+
+            # Init last update wenn nicht vorhanden
+            if 'last_landmark_update' not in st.session_state:
+                st.session_state.last_landmark_update = 0
+
+            current_time = time.time()
+
+            if current_time - st.session_state.last_landmark_update > 15:
+                for lm in landmark_list:
+                    lm.get_scaled_radius(user_lat, user_lon)  # Trigger berechnung
+                st.session_state.last_landmark_update = current_time
+
             # Check Proximity Logic
             nearby_place = None
             for _, row in filtered_df.iterrows():
@@ -444,6 +465,39 @@ else:
         else:
             map_style = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
             api_keys = None
+
+
+
+        '''
+        user_lat, user_lon = get_user_location()
+        for lm in landmark_list:
+            lm_layer_data = lm.to_layer_data(user_lat, user_lon)
+            layers.append(lm_layer_data)
+        import time
+        '''
+
+
+        def get_user_location():
+            if st.session_state.user_mode == "Spontaneous":
+                return user_lat, user_lon
+            else:
+                if not filtered_df.empty:
+                    return filtered_df.iloc[0]['lat'], filtered_df.iloc[0]['lon']
+            return 48.137, 11.575
+        u_lat, u_lon = get_user_location()
+
+        landmark_data = [lm.to_layer_data(u_lat, u_lon) for lm in landmark_list]
+        if landmark_data:
+            layers.append(pdk.Layer(
+              "ScatterplotLayer",
+              data=landmark_data,
+              get_position='[lon, lat]',
+              get_radius='radius',
+              get_fill_color='color',
+              get_line_color=[255, 255, 255, 100],
+              line_width_min_pixels=1,
+              pickable=True
+            ))
 
         st.pydeck_chart(pdk.Deck(
             map_style=map_style,
