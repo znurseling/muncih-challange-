@@ -223,7 +223,6 @@ if not st.session_state.setup_complete:
             st.success("Perfect! We are preparing your map...")
             st.rerun()
 
-# MAIN APP (AFTER SETUP)
 else:
     if df.empty:
         st.error("CSV not found! Please check places-in-munich.csv")
@@ -402,14 +401,14 @@ else:
                     data=[{"lon": user_lon, "lat": user_lat, "noise_level": 50}],
                     get_position='[lon, lat]',
                     get_color="[100, 150, 255, 220]",
-                    get_radius=100,
+                    get_radius=20,
                 ))
                 layers.append(pdk.Layer(
                     "ScatterplotLayer",
                     data=[{"lon": user_lon, "lat": user_lat, "noise_level": 50}],
                     get_position='[lon, lat]',
                     get_color="[0, 150, 255, 220]",
-                    get_radius=30,
+                    get_radius=5,
                 ))
 
                 # Discovered points (Green)
