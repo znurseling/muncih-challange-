@@ -21,6 +21,19 @@ st.set_page_config(page_title="CityTour Munich", layout="centered")
 # MAPBOX TOKEN
 MAPBOX_API_KEY = ""
 
+# === IMAGE MAPPING - INSERT YOUR IMAGE URLS HERE ===
+LANDMARK_IMAGES = {
+    "Eisbachwelle": "https://a.travel-assets.com/findyours-php/viewfinder/images/res40/195000/195001.jpg",  # Insert image URL for Eisbachwelle
+    "Monopteros": "https://www.muenchen.de/sites/default/files/styles/3_2_w1216/public/2022-06/210108_monopteros-herbst_Mde-MichaelHofmann.jpg.webp",  # Insert image URL for Monopteros
+    "Friedensengel": "https://de.wikipedia.org/wiki/Datei:M%C3%BCnchen_-_Friedensengel_mit_Font%C3%A4ne_(tone-mapping).jpg",  # Insert image URL for Friedensengel
+    "Chinesischer Turm": "https://www.muenchen.de/sites/default/files/styles/3_2_w1216/public/2022-06/20201204-kocherlball-4-3.jpg.webp",  # Insert image URL for Chinesischer Turm
+    "Viktualienmarkt": "https://www.travelguide.de/media/1200x800/muenchen-viktualienmarkt-1200x800.avif",  # Insert image URL for Viktualienmarkt
+    # more landmarks
+    #"Pinakothek der Moderne": "YOUR_IMAGE_URL_HERE",
+    #"Deutsches Museum": "YOUR_IMAGE_URL_HERE",
+    # etc...
+}
+
 # CSS (DARK MODE)
 st.markdown("""
     <style>
@@ -62,6 +75,13 @@ st.markdown("""
         border-color: #00aaff;
         color: #00aaff;
     }
+    
+    /* Landmark Image Styling */
+    .landmark-image {
+        border-radius: 15px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        margin: 10px 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -86,14 +106,8 @@ def load_data():
     except FileNotFoundError:
         return pd.DataFrame()
 
-from landmarks import Landmark
+from landmarks import landmark_list
 import time
-
-landmark_list =[
-    Landmark("Eisbachwelle", 48.1435, 11.5877, "A famous river wave...", category="Nature"),
-    Landmark("Monopteros", 48.1539, 11.5963, "Greek-style temple...", category="Nature"),
-    Landmark("Friedensengel", 48.1550, 11.5940, "Angel statue...", category="Historical")
-]
 
 @st.cache_data
 def load_air_quality_data():
@@ -362,14 +376,13 @@ else:
             # Two sliders
             col_nav1, col_nav2 = st.columns(2)
             with col_nav1:
-                lat_val = st.slider("↕️ Nord-Süd", 0, 100, 50)
+                lat_val = st.slider("↕️ Nord-Süd", 0, 100, 50, key='lat_slider')
             with col_nav2:
-                lon_val = st.slider("↔️ West-Ost", 0, 100, 50)
+                lon_val = st.slider("↔️ West-Ost", 0, 100, 50, key='lon_slider')
 
             # User Position (Ursprung: Marienplatz Center)
             user_lat = 48.1370 + ((lat_val - 50) * 0.0004)
             user_lon = 11.5750 + ((lon_val - 50) * 0.0006)
-
 
             # Init last update wenn nicht vorhanden
             if 'last_landmark_update' not in st.session_state:
@@ -441,24 +454,42 @@ else:
             view_state.zoom = 15
             view_state.bearing = 0
 
-            # Notifications
+            # === NOTIFICATIONS WITH IMAGES ===
             if nearby_place is not None:
                 st.success(f"Found: {nearby_place['name']}!")
-                st.markdown(f"""
-                **Umwelt-Info:**  
-                - Lärm: {nearby_place.get('noise_level', 'N/A')} 🔊  
-                - Luftqualität: {nearby_place.get('air_quality', 'N/A')} 🌫️  
-                - Schatten: {nearby_place.get('shade_score', 'N/A')} 🌳  
-                - Barrierefreiheit: {nearby_place.get('barrier_free_score', 'N/A')} ♿
-                - PM2.5: {nearby_place.get('pm25', 'N/A')} µg/m³
-                - PM10: {nearby_place.get('pm10', 'N/A')} µg/m³
-                - NO2: {nearby_place.get('no2', 'N/A')} µg/m³
-                """)
+
+                # Create two columns: one for image, one for info
+                col_img, col_info = st.columns([1, 1])
+
+                with col_img:
+                    # Display image if available in the mapping
+                    place_name = nearby_place['name']
+                    if place_name in LANDMARK_IMAGES and LANDMARK_IMAGES[place_name] != "YOUR_IMAGE_URL_HERE":
+                        st.markdown(
+                            f'<img src="{LANDMARK_IMAGES[place_name]}" class="landmark-image" width="100%">',
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        # Placeholder if no image is set
+                        st.info("https://upload.wikimedia.org/wikipedia/commons/d/d8/DEU_M%C3%BCnchen_COA.svg")
+
+                with col_info:
+                    st.markdown(f"""
+                    **Umwelt-Info:**  
+                    - Lärm: {nearby_place.get('noise_level', 'N/A')} 🔊  
+                    - Luftqualität: {nearby_place.get('air_quality', 'N/A')} 🌫️  
+                    - Schatten: {nearby_place.get('shade_score', 'N/A')} 🌳  
+                    - Barrierefreiheit: {nearby_place.get('barrier_free_score', 'N/A')} ♿
+                    - PM2.5: {nearby_place.get('pm25', 'N/A')} µg/m³
+                    - PM10: {nearby_place.get('pm10', 'N/A')} µg/m³
+                    - NO2: {nearby_place.get('no2', 'N/A')} µg/m³
+                    """)
+
                 if st.button("🔊 Listen the information"):
                     aud = text_to_speech(nearby_place.get('desc', 'No description available'))
                     if aud: st.audio(aud, format='audio/mp3')
 
-        # Map
+        # Map (NO LANDMARK ICONS RENDERED HERE ANYMORE)
         if MAPBOX_API_KEY:
             map_style = "mapbox://styles/mapbox/dark-v10"
             api_keys = {"mapbox": MAPBOX_API_KEY}
@@ -466,39 +497,7 @@ else:
             map_style = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
             api_keys = None
 
-
-
-        '''
-        user_lat, user_lon = get_user_location()
-        for lm in landmark_list:
-            lm_layer_data = lm.to_layer_data(user_lat, user_lon)
-            layers.append(lm_layer_data)
-        import time
-        '''
-
-
-        def get_user_location():
-            if st.session_state.user_mode == "Spontaneous":
-                return user_lat, user_lon
-            else:
-                if not filtered_df.empty:
-                    return filtered_df.iloc[0]['lat'], filtered_df.iloc[0]['lon']
-            return 48.137, 11.575
-        u_lat, u_lon = get_user_location()
-
-        landmark_data = [lm.to_layer_data(u_lat, u_lon) for lm in landmark_list]
-        if landmark_data:
-            layers.append(pdk.Layer(
-              "ScatterplotLayer",
-              data=landmark_data,
-              get_position='[lon, lat]',
-              get_radius='radius',
-              get_fill_color='color',
-              get_line_color=[255, 255, 255, 100],
-              line_width_min_pixels=1,
-              pickable=True
-            ))
-
+        # === RENDER MAP (without landmark icons) ===
         st.pydeck_chart(pdk.Deck(
             map_style=map_style,
             initial_view_state=view_state,
@@ -535,11 +534,19 @@ else:
             with col4:
                 st.markdown("🔴 **Unhealthy**<br/>>55 µg/m³", unsafe_allow_html=True)
 
-        # LIST OF STOPS
+        # LIST OF STOPS (WITH IMAGES IN GUIDED MODE)
         if st.session_state.user_mode == "Guided":
             st.markdown("### Your route")
             for idx, row in filtered_df.reset_index(drop=True).iterrows():
                 with st.expander(f"{idx+1}. {row['name']}"):
+                    # Show image in expander if available
+                    place_name = row['name']
+                    if place_name in LANDMARK_IMAGES and LANDMARK_IMAGES[place_name] != "YOUR_IMAGE_URL_HERE":
+                        st.markdown(
+                            f'<img src="{LANDMARK_IMAGES[place_name]}" class="landmark-image" width="100%">',
+                            unsafe_allow_html=True
+                        )
+
                     st.write(row.get('desc', 'No description available'))
                     st.markdown(f"""
                     **Umwelt-Info:**  
